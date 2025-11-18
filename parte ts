@@ -655,7 +655,7 @@ app.post('/apagardisciplina', async (req: Request, res: Response) => {
 //  ||                       ||
 //--\/GERENCIAMENTO DE TURMAS\/--
 
-//buscar turmas
+//buscar turmas//conecta a turma e devolve em json
 app.post('/buscarturmas', async (req: Request, res: Response) => {
     const id_dis = req.body.id_dis;
     let con = null;
@@ -673,7 +673,7 @@ app.post('/buscarturmas', async (req: Request, res: Response) => {
     } catch (err) {
         console.error("Erro ao buscar turmas:", err);
         res.status(500);
-        res.json({ message: "Erro ao buscar turmas" });
+        res.json({ message: "Erro ao buscar turmas" });//aqui nao tem confirm pq n e normal tem erro aqui
     } finally {
         if (con) {
             await con.close();
@@ -684,43 +684,67 @@ app.post('/buscarturmas', async (req: Request, res: Response) => {
 
 //adicionar turma
 app.post('/adicionarturma', async (req: Request, res: Response) => {
-    const { id_dis, nome_tur, car_hor, car_dia } = req.body;
+    const { id_cur, nome_tur, loc_tur, car_hor, car_dia } = req.body;
     let con = null;
-    let confirm: boolean = false;
+    let confirm: boolean = false;//mostrar q deu certo no front 
 
     try {
         con = await oracledb.getConnection();
 
-        const comando = `
-            INSERT INTO NOTADEZ.TURMAS (NOME_TURMA, LOCAL_AULA, HORARIO_AULA, DIA_AULA)
-            VALUES (:nome_tur, :local_aula, :horario_aula, :dia_aula)
-            RETURNING ID_TURMA INTO :id_turma
+        const comando : string = `
+            INSERT INTO NOTADEZ.TURMAS (NOME_TURMA, LOCAL_AULA, HORARIO_AULA, DIA_AULA, ID_CURSO)
+            VALUES (:nome_tur, :loc_tur, :car_hor, :car_dia, :id_cur)
         `;
 
-        const bindVars = {
-            nome_tur,
-            local_aula: car_dia,
-            horario_aula: car_hor,
-            dia_aula: car_dia, // Usando car_dia como dia_aula também
-            id_turma: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT }
-        };
-
-        const result: any = await con.execute(comando, bindVars, { autoCommit: true });
-        const id_turma = result.outBinds.id_turma[0];
-
-        await con.execute(
-            `INSERT INTO NOTADEZ.TURMA_DISCIPLINA (ID_TURMA, ID_DISCIPLINA)
-             VALUES (:id_turma, :id_dis)`,
-            { id_turma, id_dis },
-            { autoCommit: true }
-        );
+        const result: any = await con.execute(comando,
+            { nome_tur, loc_tur, car_hor, car_dia, id_cur },
+            { autoCommit: true });
 
         confirm = true;
-        return res.json({ confirm, message: "Turma adicionada com sucesso" });
+        return res.json({ confirm, message: "Turma criada com sucesso" });
 
     } catch (err) {
-        console.error("Erro ao adicionar turma:", err);
-        return res.status(500).json({ confirm, message: "Erro ao adicionar turma" });
+        console.error("Erro ao criar turma:", err);
+        return res.status(500).json({ confirm, message: "Erro ao criar turma" });
+    } finally {
+        if (con) await con.close();
+    }
+});
+
+//associar disciplina com turma
+app.post('/enviardisciplinaturma', async (req:Request, res:Response) => {
+    const nome_tur = req.body.nome_tur;
+    const id_dis = req.body.id_dis;
+    const id_cur = req.body.id_cur;
+    let confirm:boolean = false;
+    const con = await oracledb.getConnection();
+
+    try{ 
+        const selsql:string = `SELECT id_turma FROM NOTADEZ.TURMAS
+        WHERE NOME_TURMA = :nome_tur AND ID_CURSO = :id_cur`;
+
+        const dados:any = await con.execute(selsql, { nome_tur, id_cur });
+
+        if(dados.rows!.length > 0 ){
+
+            const id_tur: any = dados.rows![0][0];
+             const sql:string = `INSERT INTO NOTADEZ.DISCIPLINA_TURMAS(id_dis, id_tur) 
+             VALUES(:id_dis, :id_tur)`;
+
+            await con.execute(sql, { id_dis, id_tur }, { autoCommit: true});
+
+            confirm= true;
+            res.status(201).json({ confirm, mensagem : "Turma adicionada a disciplina"});
+           
+        } else {
+            res.status(500).json({ confirm, mensagem : "essa Turma não existe" });
+           
+        }
+
+        
+    } catch(err){
+        console.log(err);
+        res.json({ confirm, mensagem : "Falha ao criar associação (turma/disciplina)"});
     } finally {
         if (con) await con.close();
     }
